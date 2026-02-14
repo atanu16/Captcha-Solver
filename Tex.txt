@@ -1,9 +1,15 @@
 import streamlit as st
 from PIL import Image
+import pytesseract
 import requests
 from io import BytesIO
 import time
 import os
+import cv2
+import numpy as np
+
+# If Tesseract is NOT in PATH, uncomment and set your path:
+# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # -------------------------------
 # PAGE CONFIG
@@ -15,7 +21,7 @@ st.set_page_config(
 )
 
 # -------------------------------
-# CUSTOM STYLING (Modern Clean UI)
+# CLEAN MODERN STYLING
 # -------------------------------
 st.markdown("""
 <style>
@@ -26,18 +32,13 @@ st.markdown("""
     width: 100%;
     height: 45px;
     font-size: 16px;
-    border-radius: 8px;
+    border-radius: 10px;
 }
 .stTextInput>div>div>input {
     border-radius: 8px;
 }
 .stFileUploader {
     border-radius: 8px;
-}
-.status-box {
-    padding: 10px;
-    border-radius: 8px;
-    font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -46,7 +47,7 @@ st.markdown("""
 # HEADER
 # -------------------------------
 st.title("🧠 Smart OCR Extractor")
-st.caption("Modern Image Text Extraction Tool")
+st.caption("Advanced Image Text Recognition Tool (English + Numbers)")
 
 st.divider()
 
@@ -59,7 +60,6 @@ col1, col2 = st.columns(2)
 
 with col1:
     image_url = st.text_input("🌐 Enter Image URL")
-
     local_path = st.text_input("📂 Enter Local File Path")
 
 with col2:
@@ -69,7 +69,7 @@ with col2:
     )
 
 # -------------------------------
-# IMAGE PREVIEW
+# IMAGE PREVIEW LOGIC
 # -------------------------------
 st.subheader("🖼️ Image Preview")
 
@@ -98,11 +98,54 @@ try:
     elif error_message:
         st.error(error_message)
 
-except Exception as e:
+except Exception:
     st.error("Error loading image.")
 
 # -------------------------------
-# EXECUTE BUTTON
+# ADVANCED PREPROCESSING FUNCTION
+# -------------------------------
+def preprocess_image(pil_image):
+    img = np.array(pil_image)
+
+    # Convert RGB to BGR
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    # Resize (improves small text detection)
+    scale_percent = 150
+    width = int(img.shape[1] * scale_percent / 100)
+    height = int(img.shape[0] * scale_percent / 100)
+    img = cv2.resize(img, (width, height), interpolation=cv2.INTER_CUBIC)
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # CLAHE contrast enhancement
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    gray = clahe.apply(gray)
+
+    # Noise removal
+    gray = cv2.fastNlMeansDenoising(gray, None, 30, 7, 21)
+
+    # Sharpening
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5,-1],
+                       [0, -1, 0]])
+    sharp = cv2.filter2D(gray, -1, kernel)
+
+    # Adaptive threshold
+    thresh = cv2.adaptiveThreshold(
+        sharp,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        11,
+        2
+    )
+
+    return thresh
+
+# -------------------------------
+# EXECUTION SECTION
 # -------------------------------
 st.divider()
 st.subheader("⚙️ Process Image")
@@ -115,29 +158,44 @@ if st.button("🚀 Execute Extraction"):
     if image is None:
         status_placeholder.error("❌ No valid image provided.")
     else:
-        status_placeholder.info("⏳ Processing... Please wait")
-        time.sleep(2)  # simulate processing time
+        try:
+            status_placeholder.info("⏳ Enhancing image...")
+            time.sleep(1)
 
-        # Placeholder result (OCR will come in Phase 2)
-        extracted_text = "Sample extracted text will appear here after OCR integration."
+            processed_image = preprocess_image(image)
 
-        status_placeholder.success("✅ Extraction Completed Successfully!")
+            status_placeholder.info("🔍 Extracting text...")
+            time.sleep(1)
 
-        result_placeholder.subheader("📄 Extracted Text")
-        result_placeholder.text_area(
-            "Result",
-            extracted_text,
-            height=200
-        )
+            custom_config = r'''
+            --oem 3
+            --psm 6
+            -l eng
+            -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
+            '''
 
-        st.download_button(
-            "📋 Copy / Download Text",
-            extracted_text,
-            file_name="extracted_text.txt"
-        )
+            extracted_text = pytesseract.image_to_string(
+                processed_image,
+                config=custom_config
+            )
 
-# -------------------------------
-# FOOTER
-# -------------------------------
+            status_placeholder.success("✅ Extraction Completed Successfully!")
+
+            result_placeholder.subheader("📄 Extracted Text")
+            result_placeholder.text_area(
+                "Result",
+                extracted_text,
+                height=250
+            )
+
+            st.download_button(
+                "📋 Download Extracted Text",
+                extracted_text,
+                file_name="extracted_text.txt"
+            )
+
+        except Exception as e:
+            status_placeholder.error("❌ OCR Failed. Check Tesseract installation.")
+
 st.divider()
-st.caption("Built with Streamlit • Phase 1 UI Completed")
+st.caption("Built with Streamlit + Advanced OpenCV + Tesseract OCR")
